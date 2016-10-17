@@ -142,7 +142,7 @@ struct PGroup {
   int AinSize;
   int AoutSize;
   int AmSize;
-  int hit, miss;
+//  int hit, miss;
 };
 
 /* Each page cache is an instance of the following object.  Every
@@ -178,6 +178,8 @@ struct PCache1 {
   PgHdr1 **apHash;                    /* Hash table for fast lookup by key */
   PgHdr1 *pFree;                      /* List of unused pcache-local pages */
   void *pBulk;                        /* Bulk memory used by pcache-local */
+  int hit;
+  int miss;
 };
 
 /*
@@ -793,8 +795,8 @@ static sqlite3_pcache *pcache1Create(int szPage, int szExtra, int bPurgeable){
     pGroup->Kout = 500;
     pGroup->pageSlot = 1000;
     pGroup->AinSize = pGroup->AoutSize = pGroup->AmSize = 0;
-    pGroup->hit = 0;
-    pGroup->miss = 0;
+    //pGroup->hit = 0;
+    //pGroup->miss = 0;
 
     pCache->pGroup = pGroup;
     pCache->szPage = szPage;
@@ -1035,6 +1037,8 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
   ** attempt to allocate a new one. 
   */
   if( !pPage ){
+	  pCache->miss++;
+	  printf("miss %d\n", pCache->miss);
     pPage = pcache1AllocPage(pCache, createFlag==1);
     pPage->from = 1;
     pPage->pCache = pCache;
@@ -1147,21 +1151,22 @@ static PgHdr1 *pcache1FetchNoMutex(
   ** Otherwise (page not in hash and createFlag!=0) continue with
   ** subsequent steps to try to create the page. */
   if( pPage ){
-    pGroup->hit++;
+    pCache->hit++;
+    printf("hit %d\n", pCache->hit);
     if( !pPage->isPinned ){
       return pcache1PinPage(pPage);
     }else{
       return pPage;
     }
   }else if( createFlag ){
-    pGroup->miss++;
+    //pGroup->miss++;
     /* Steps 3, 4, and 5 implemented by this subroutine */
     return pcache1FetchStage2(pCache, iKey, createFlag);
   }else{
     return 0;
   }
-  printf("HIT Ratio hit : %d, miss : %d\n", pGroup->hit, pGroup->miss);
-  fflush(stdout);
+  //printf("HIT Ratio hit : %d, miss : %d\n", pGroup->hit, pGroup->miss);
+  //fflush(stdout);
 }
 #if PCACHE1_MIGHT_USE_GROUP_MUTEX
 static PgHdr1 *pcache1FetchWithMutex(
