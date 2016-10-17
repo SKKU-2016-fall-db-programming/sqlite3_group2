@@ -103,7 +103,7 @@ struct PgHdr1 {
   PCache1 *pCache;               /* Cache that currently owns this page */
   PgHdr1 *pLruNext;              /* Next in LRU list of unpinned pages */
   PgHdr1 *pLruPrev;              /* Previous in LRU list of unpinned pages */
-  u8 from;
+  u8 from;                       /* where they are from. 1: Aout, 2: Ain, 4: Am */
 };
 
 /* Each page cache (or PCache) belongs to a PGroup.  A PGroup is a set 
@@ -137,12 +137,14 @@ struct PGroup {
   PgHdr1 lru;                    /* The beginning and end of the LRU list */
   PgHdr1 Ain;
   PgHdr1 Aout;
+  //need some help
   PgHdr1 *AinStart;
   PgHdr1 *AinEnd;
   PgHdr1 *AoutStart;
   PgHdr1 *AoutEnd;
   PgHdr1 *AmStart;
   PgHdr1 *AmEnd;
+  //
   int Kin;
   int Kout;
   int pageSlot;
@@ -707,10 +709,6 @@ static int pcache1Init(void *NotUsed){
   UNUSED_PARAMETER(NotUsed);
   assert( pcache1.isInit==0 );
   memset(&pcache1, 0, sizeof(pcache1));
-  pcache1.pGroup->Kin=250;
-  pcache1.pGroup->Kout=500;
-  pcache1.pGroup->pageSlot=1000;
-
   /*
   ** The pcache1.separateCache variable is true if each PCache has its own
   ** private PGroup (mode-1).  pcache1.separateCache is false if the single
@@ -793,6 +791,11 @@ static sqlite3_pcache *pcache1Create(int szPage, int szExtra, int bPurgeable){
       pGroup->lru.isAnchor = 1;
       pGroup->lru.pLruPrev = pGroup->lru.pLruNext = &pGroup->lru;
     }
+    //pGroup init need more accurate numbering
+    pGroup->Kin = 250;
+    pGroup->Kout = 500;
+    pGroup->pageSlot = 1000;
+    
     pCache->pGroup = pGroup;
     pCache->szPage = szPage;
     pCache->szExtra = szExtra;
@@ -852,6 +855,24 @@ static void pcache1Shrink(sqlite3_pcache *p){
   }
 }
 
+static PgHdr1 *pcacheFifoDeque(PgHdr1* fifoList){
+    PgHdr1* target = fifoList->pLruPrev;
+    //find target to deque , which is not pinned
+    while(!target->isPinned && target != fifoList)
+        target = target->pLruPrev;
+    //if every fifo list is pinned then return fail
+    if(target == fifoList){
+        return 0;
+    }else{
+        fifoList->pLruPrev->pLruNext = fifoList->pLruNext;
+        fifoList->pLruNext->pLruPrev = fifoList->pLruPrev;
+        target->pLruNext->pLruPrev = fifoList;
+        target->pLruPrev->pLruNext = fifoList;
+        target->pLruPrev = target->pLruNext = 0;
+    }
+    return target;
+}
+
 /*
 ** Implementation of the sqlite3_pcache.xPagecount method. 
 */
@@ -863,6 +884,36 @@ static int pcache1Pagecount(sqlite3_pcache *p){
   pcache1LeaveMutex(pCache->pGroup);
   return n;
 }
+
+static PgHdr1* reclaimfor(PGroup* pg)
+{
+  PgHdr1* res = NULL;
+  
+  
+  //if(pg->AinSize+pg->AmSize<pg->pageSlot){return NULL}
+  if(pg->AinSize > pg->Kin)
+  {
+    //dequeue(Ain)
+    res = pcacheFifoDeque(pg->AinStart);
+    
+    //enqueue(Aout)
+    pg->AoutStart->pLruPrev=res;
+    res->pLruNext=pg->AoutStart;
+    pg->AoutEnd->pLruNext=res;
+    res->pLruPrev=pg->AoutEnd;
+    
+    if(pg->AoutSize > pg->Kout)
+      res = pcacheFifoDeque(pg->AoutStart); 
+  }
+  else
+    res = pg->AmEnd;
+    
+  res->from=1;
+    
+  return res;
+}
+
+
 
 
 /*
@@ -940,7 +991,7 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
     pPage->isPinned = 1;
     *(void **)pPage->page.pExtra = 0;
     pCache->apHash[h] = pPage;
-
+    //from 에 따라 다르게 해야할듯?
     //Ain에 넣어줌
     pPage->pLruNext=pGroup->AinStart;
     pPage->pLruPrev=pGroup->AinEnd;
@@ -954,52 +1005,6 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
   return pPage;
 }
 
-static PgHdr1* reclaimfor(PGroup* pg)
-{
-  PgHdr1* res = NULL;
-  
-  
-  //if(pg->AinSize+pg->AmSize<pg->pageSlot){return NULL}
-  if(pg->AinSize > pg->Kin)
-  {
-    //dequeue(Ain)
-    res = pcacheFifoDeque(pg->AinStart);
-    
-    //enqueue(Aout)
-    pg->AoutStart->pLruPrev=res;
-    res->pLruNext=pg->AoutStart;
-    pg->AoutEnd->pLruNext=res;
-    res->pLruPrev=pg->AoutEnd;
-    
-    if(pg->AoutSize > pg->Kout)
-      res = pcacheFifoDeque(pg->AoutStart); 
-  }
-  else
-    res = pg->AmEnd;
-    
-  res.from=1;
-    
-  return res;
-}
-
-static PgHdr1 *pcacheFifoDeque(PgHdr1* fifoList){                                                                                               
-     PgHdr1* target = fifoList->pLruPrev;                                                                                                      
-     //find target to deque, which is not pinned                                                                                               
-     while(!target->isPinned && target != fifoList)                                                                                            
-         target = target->pLruPrev;                                                                                                            
-     //if every fifo list is pinned then return fail                                                                                           
-     if(target == fifoList){                                                                                                                   
-         return 0;                                                                                                                             
-     //else remove target from fifo and move fifoList to next of target->prev                                                                  
-     }else{                                                                                                                                    
-         fifoList->pLruPrev->pLruNext = fifoList->pLruNext;
-     fifoList->pLruNext->pLruPrev = fifoList->pLruPrev;
-         target->pLruNext->pLruPrev = fifoList;                                                                                                
-         target->pLruPrev->pLruNext = fifoList;                                                                                                
-         target->pLruPrev = target->pLruNext = 0;                                                                                              
-     }                                                                                                                                         
-     return target;                                                                                                                            
- }
 
 /*
 ** Implementation of the sqlite3_pcache.xFetch method. 
