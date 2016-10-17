@@ -86,7 +86,6 @@ typedef struct PCache1 PCache1;
 typedef struct PgHdr1 PgHdr1;
 typedef struct PgFreeslot PgFreeslot;
 typedef struct PGroup PGroup;
-
 /*
 ** Each cache entry is represented by an instance of the following 
 ** structure. Unless SQLITE_PCACHE_SEPARATE_HEADER is defined, a buffer of
@@ -143,6 +142,7 @@ struct PGroup {
   int AinSize;
   int AoutSize;
   int AmSize;
+  int hit, miss;
 };
 
 /* Each page cache is an instance of the following object.  Every
@@ -793,6 +793,8 @@ static sqlite3_pcache *pcache1Create(int szPage, int szExtra, int bPurgeable){
     pGroup->Kout = 500;
     pGroup->pageSlot = 1000;
     pGroup->AinSize = pGroup->AoutSize = pGroup->AmSize = 0;
+    pGroup->hit = 0;
+    pGroup->miss = 0;
 
     pCache->pGroup = pGroup;
     pCache->szPage = szPage;
@@ -900,10 +902,6 @@ static int pcacheFifoEnque(PgHdr1* target, u8 dest){
             break;
             */
     }
-    target->pLruNext = fifoList->pLruNext;
-    target->pLruPrev = fifoList;
-    fifoList->pLruNext->pLruPrev = target;
-    fifoList->pLruNext = target;
     return 1;
 }
 static PgHdr1 *pcacheFifoDeque(PgHdr1 fifoList){
@@ -1040,7 +1038,13 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
     pPage = pcache1AllocPage(pCache, createFlag==1);
     pPage->from = 1;
     pPage->pCache = pCache;
-    pcacheFifoEnque(pPage,1); 
+    //enque to Ain
+    pPage->pLruNext = pGroup->Ain.pLruNext;
+    pPage->pLruPrev = &pGroup->Ain;
+    if(pGroup->Ain.pLruNext)
+        pGroup->Ain.pLruNext->pLruPrev = pPage;
+    pGroup->Ain.pLruNext = pPage;
+    
   }
 
   if( pPage ){
@@ -1131,6 +1135,7 @@ static PgHdr1 *pcache1FetchNoMutex(
   int createFlag
 ){
   PCache1 *pCache = (PCache1 *)p;
+  PGroup *pGroup = pCache->pGroup;
   PgHdr1 *pPage = 0;
 
   /* Step 1: Search the hash table for an existing entry. */
@@ -1142,17 +1147,21 @@ static PgHdr1 *pcache1FetchNoMutex(
   ** Otherwise (page not in hash and createFlag!=0) continue with
   ** subsequent steps to try to create the page. */
   if( pPage ){
+    pGroup->hit++;
     if( !pPage->isPinned ){
       return pcache1PinPage(pPage);
     }else{
       return pPage;
     }
   }else if( createFlag ){
+    pGroup->miss++;
     /* Steps 3, 4, and 5 implemented by this subroutine */
     return pcache1FetchStage2(pCache, iKey, createFlag);
   }else{
     return 0;
   }
+  printf("HIT Ratio hit : %d, miss : %d\n", pGroup->hit, pGroup->miss);
+  fflush(stdout);
 }
 #if PCACHE1_MIGHT_USE_GROUP_MUTEX
 static PgHdr1 *pcache1FetchWithMutex(
