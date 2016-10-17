@@ -137,14 +137,6 @@ struct PGroup {
   PgHdr1 lru;                    /* The beginning and end of the LRU list */
   PgHdr1 Ain;
   PgHdr1 Aout;
-  //need some help
-  PgHdr1 *AinStart;
-  PgHdr1 *AinEnd;
-  PgHdr1 *AoutStart;
-  PgHdr1 *AoutEnd;
-  PgHdr1 *AmStart;
-  PgHdr1 *AmEnd;
-  //
   int Kin;
   int Kout;
   int pageSlot;
@@ -611,6 +603,7 @@ if(pPage->from == 4 || pPage->from == 2)
 **
 ** The PGroup mutex must be held when this function is called.
 */
+static void pcache1RemoveFromHash(PgHdr1 *pPage, int freeFlag);
 static void pcache1RemoveFromHash(PgHdr1 *pPage, int freeFlag){
   unsigned int h;
   PCache1 *pCache = pPage->pCache;
@@ -855,19 +848,19 @@ static void pcache1Shrink(sqlite3_pcache *p){
   }
 }
 
-static PgHdr1 *pcacheFifoDeque(PgHdr1* fifoList){
-    PgHdr1* target = fifoList->pLruPrev;
+static PgHdr1 *pcacheFifoDeque(PgHdr1 fifoList){
+    PgHdr1* target = fifoList.pLruPrev;
     //find target to deque , which is not pinned
-    while(!target->isPinned && target != fifoList)
+    while(!target->isPinned && target != &fifoList)
         target = target->pLruPrev;
     //if every fifo list is pinned then return fail
-    if(target == fifoList){
+    if(target == &fifoList){
         return 0;
     }else{
-        fifoList->pLruPrev->pLruNext = fifoList->pLruNext;
-        fifoList->pLruNext->pLruPrev = fifoList->pLruPrev;
-        target->pLruNext->pLruPrev = fifoList;
-        target->pLruPrev->pLruNext = fifoList;
+        fifoList.pLruPrev->pLruNext = fifoList.pLruNext;
+        fifoList.pLruNext->pLruPrev = fifoList.pLruPrev;
+        target->pLruNext->pLruPrev = &fifoList;
+        target->pLruPrev->pLruNext = &fifoList;
         target->pLruPrev = target->pLruNext = 0;
     }
     return target;
@@ -888,28 +881,26 @@ static int pcache1Pagecount(sqlite3_pcache *p){
 static PgHdr1* reclaimfor(PGroup* pg)
 {
   PgHdr1* res = NULL;
-  
-  
+  //size 관리 필요 
   //if(pg->AinSize+pg->AmSize<pg->pageSlot){return NULL}
   if(pg->AinSize > pg->Kin)
   {
     //dequeue(Ain)
-    res = pcacheFifoDeque(pg->AinStart);
+    res = pcacheFifoDeque(pg->Ain);
     
     //enqueue(Aout)
-    pg->AoutStart->pLruPrev=res;
-    res->pLruNext=pg->AoutStart;
-    pg->AoutEnd->pLruNext=res;
-    res->pLruPrev=pg->AoutEnd;
-    
+    res->pLruNext = pg->Aout.pLruNext;
+    pg->Aout.pLruNext->pLruPrev = res;
+    pg->Aout.pLruNext = res;
+    res->pLruPrev = &pg->Aout;
+
     if(pg->AoutSize > pg->Kout)
-      res = pcacheFifoDeque(pg->AoutStart); 
+      res = pcacheFifoDeque(pg->Aout); 
   }
-  else
-    res = pg->AmEnd;
-    
+  else{
+    res = pg->lru.pLruPrev;
+  }
   res->from=1;
-    
   return res;
 }
 
@@ -961,7 +952,7 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
     if(pPage)
     {
       assert( pPage->isPinned==0 );
-      pcache1RemovefFromHash(pPage, 0);
+      pcache1RemoveFromHash(pPage, 0);
       pcache1PinPage(pPage);
       pOther = pPage->pCache;
       if( pOther->szAlloc != pCache->szAlloc ){
@@ -993,11 +984,12 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
     pCache->apHash[h] = pPage;
     //from 에 따라 다르게 해야할듯?
     //Ain에 넣어줌
+    /*
     pPage->pLruNext=pGroup->AinStart;
     pPage->pLruPrev=pGroup->AinEnd;
     pGroup->AinStart->pLruPrev=pPage;
     pGroup->AinEnd->pLruNext=pPage;
-    
+    */
     if( iKey>pCache->iMaxKey ){
       pCache->iMaxKey = iKey;
     }

@@ -103,6 +103,7 @@ struct PgHdr1 {
   PCache1 *pCache;               /* Cache that currently owns this page */
   PgHdr1 *pLruNext;              /* Next in LRU list of unpinned pages */
   PgHdr1 *pLruPrev;              /* Previous in LRU list of unpinned pages */
+  u8 from;                       /* where they are from. 1: Aout, 2: Ain, 4: Am */
 };
 
 /* Each page cache (or PCache) belongs to a PGroup.  A PGroup is a set 
@@ -134,6 +135,22 @@ struct PGroup {
   unsigned int mxPinned;         /* nMaxpage + 10 - nMinPage */
   unsigned int nCurrentPage;     /* Number of purgeable pages allocated */
   PgHdr1 lru;                    /* The beginning and end of the LRU list */
+  PgHdr1 Ain;
+  PgHdr1 Aout;
+  //need some help
+  PgHdr1 *AinStart;
+  PgHdr1 *AinEnd;
+  PgHdr1 *AoutStart;
+  PgHdr1 *AoutEnd;
+  PgHdr1 *AmStart;
+  PgHdr1 *AmEnd;
+  //
+  int Kin;
+  int Kout;
+  int pageSlot;
+  int AinSize;
+  int AoutSize;
+  int AmSize;
 };
 
 /* Each page cache is an instance of the following object.  Every
@@ -562,18 +579,27 @@ static PgHdr1 *pcache1PinPage(PgHdr1 *pPage){
 
   assert( pPage!=0 );
   assert( pPage->isPinned==0 );
+//이부분만 from으로 감싸면 될 거 같은데?
+if(pPage->from == 4 || pPage->from == 2)
+{
   pCache = pPage->pCache;
   assert( pPage->pLruNext );
   assert( pPage->pLruPrev );
   assert( sqlite3_mutex_held(pCache->pGroup->mutex) );
+
+  
   pPage->pLruPrev->pLruNext = pPage->pLruNext;
   pPage->pLruNext->pLruPrev = pPage->pLruPrev;
   pPage->pLruNext = 0;
   pPage->pLruPrev = 0;
-  pPage->isPinned = 1;
+
   assert( pPage->isAnchor==0 );
   assert( pCache->pGroup->lru.isAnchor==1 );
   pCache->nRecyclable--;
+  pPage->from=4;
+}
+
+  pPage->isPinned = 1;
   return pPage;
 }
 
@@ -585,6 +611,7 @@ static PgHdr1 *pcache1PinPage(PgHdr1 *pPage){
 **
 ** The PGroup mutex must be held when this function is called.
 */
+static void pcache1RemoveFromHash(PgHdr1 *pPage, int freeFlag);
 static void pcache1RemoveFromHash(PgHdr1 *pPage, int freeFlag){
   unsigned int h;
   PCache1 *pCache = pPage->pCache;
@@ -683,8 +710,6 @@ static int pcache1Init(void *NotUsed){
   UNUSED_PARAMETER(NotUsed);
   assert( pcache1.isInit==0 );
   memset(&pcache1, 0, sizeof(pcache1));
-
-
   /*
   ** The pcache1.separateCache variable is true if each PCache has its own
   ** private PGroup (mode-1).  pcache1.separateCache is false if the single
@@ -767,6 +792,11 @@ static sqlite3_pcache *pcache1Create(int szPage, int szExtra, int bPurgeable){
       pGroup->lru.isAnchor = 1;
       pGroup->lru.pLruPrev = pGroup->lru.pLruNext = &pGroup->lru;
     }
+    //pGroup init need more accurate numbering
+    pGroup->Kin = 250;
+    pGroup->Kout = 500;
+    pGroup->pageSlot = 1000;
+    
     pCache->pGroup = pGroup;
     pCache->szPage = szPage;
     pCache->szExtra = szExtra;
@@ -826,6 +856,24 @@ static void pcache1Shrink(sqlite3_pcache *p){
   }
 }
 
+static PgHdr1 *pcacheFifoDeque(PgHdr1* fifoList){
+    PgHdr1* target = fifoList->pLruPrev;
+    //find target to deque , which is not pinned
+    while(!target->isPinned && target != fifoList)
+        target = target->pLruPrev;
+    //if every fifo list is pinned then return fail
+    if(target == fifoList){
+        return 0;
+    }else{
+        fifoList->pLruPrev->pLruNext = fifoList->pLruNext;
+        fifoList->pLruNext->pLruPrev = fifoList->pLruPrev;
+        target->pLruNext->pLruPrev = fifoList;
+        target->pLruPrev->pLruNext = fifoList;
+        target->pLruPrev = target->pLruNext = 0;
+    }
+    return target;
+}
+
 /*
 ** Implementation of the sqlite3_pcache.xPagecount method. 
 */
@@ -837,6 +885,36 @@ static int pcache1Pagecount(sqlite3_pcache *p){
   pcache1LeaveMutex(pCache->pGroup);
   return n;
 }
+
+static PgHdr1* reclaimfor(PGroup* pg)
+{
+  PgHdr1* res = NULL;
+  
+  
+  //if(pg->AinSize+pg->AmSize<pg->pageSlot){return NULL}
+  if(pg->AinSize > pg->Kin)
+  {
+    //dequeue(Ain)
+    res = pcacheFifoDeque(pg->AinStart);
+    
+    //enqueue(Aout)
+    pg->AoutStart->pLruPrev=res;
+    res->pLruNext=pg->AoutStart;
+    pg->AoutEnd->pLruNext=res;
+    res->pLruPrev=pg->AoutEnd;
+    
+    if(pg->AoutSize > pg->Kout)
+      res = pcacheFifoDeque(pg->AoutStart); 
+  }
+  else
+    res = pg->AmEnd;
+    
+  res->from=1;
+    
+  return res;
+}
+
+
 
 
 /*
@@ -878,16 +956,21 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
    && ((pCache->nPage+1>=pCache->nMax) || pcache1UnderMemoryPressure(pCache))
   ){
     PCache1 *pOther;
-    pPage = pGroup->lru.pLruPrev;
-    assert( pPage->isPinned==0 );
-    pcache1RemoveFromHash(pPage, 0);
-    pcache1PinPage(pPage);
-    pOther = pPage->pCache;
-    if( pOther->szAlloc != pCache->szAlloc ){
-      pcache1FreePage(pPage);
-      pPage = 0;
-    }else{
-      pGroup->nCurrentPage -= (pOther->bPurgeable - pCache->bPurgeable);
+
+    //pPage = pGroup->lru.pLruPrev;
+    pPage = reclaimfor(pGroup);
+    if(pPage)
+    {
+      assert( pPage->isPinned==0 );
+      pcache1RemoveFromHash(pPage, 0);
+      pcache1PinPage(pPage);
+      pOther = pPage->pCache;
+      if( pOther->szAlloc != pCache->szAlloc ){
+        pcache1FreePage(pPage);
+        pPage = 0;
+      }else{
+        pGroup->nCurrentPage -= (pOther->bPurgeable - pCache->bPurgeable);
+      }
     }
   }
 
@@ -909,12 +992,20 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
     pPage->isPinned = 1;
     *(void **)pPage->page.pExtra = 0;
     pCache->apHash[h] = pPage;
+    //from 에 따라 다르게 해야할듯?
+    //Ain에 넣어줌
+    pPage->pLruNext=pGroup->AinStart;
+    pPage->pLruPrev=pGroup->AinEnd;
+    pGroup->AinStart->pLruPrev=pPage;
+    pGroup->AinEnd->pLruNext=pPage;
+    
     if( iKey>pCache->iMaxKey ){
       pCache->iMaxKey = iKey;
     }
   }
   return pPage;
 }
+
 
 /*
 ** Implementation of the sqlite3_pcache.xFetch method. 
@@ -1073,11 +1164,15 @@ static void pcache1Unpin(
     pcache1RemoveFromHash(pPage, 1);
   }else{
     /* Add the page to the PGroup LRU list. */
-    PgHdr1 **ppFirst = &pGroup->lru.pLruNext;
-    pPage->pLruPrev = &pGroup->lru;
-    (pPage->pLruNext = *ppFirst)->pLruPrev = pPage;
-    *ppFirst = pPage;
-    pCache->nRecyclable++;
+    //from이 4면 기존대로, 1이면 ispinned만
+    if(pPage->from == 4)
+    {
+      PgHdr1 **ppFirst = &pGroup->lru.pLruNext;
+      pPage->pLruPrev = &pGroup->lru;
+      (pPage->pLruNext = *ppFirst)->pLruPrev = pPage;
+      *ppFirst = pPage;
+      pCache->nRecyclable++;
+    }
     pPage->isPinned = 0;
   }
 
