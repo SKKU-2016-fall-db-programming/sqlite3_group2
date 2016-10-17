@@ -103,7 +103,7 @@ struct PgHdr1 {
   PCache1 *pCache;               /* Cache that currently owns this page */
   PgHdr1 *pLruNext;              /* Next in LRU list of unpinned pages */
   PgHdr1 *pLruPrev;              /* Previous in LRU list of unpinned pages */
-  u8 from;                       /* where they are from. 1: Aout, 2: Ain, 4: Am */
+  u8 from;                       /* where they are from. 1: Ain, 2: Aout, 4: Am */
 };
 
 /* Each page cache (or PCache) belongs to a PGroup.  A PGroup is a set 
@@ -588,6 +588,10 @@ if(pPage->from == 4 || pPage->from == 2)
   assert( pPage->isAnchor==0 );
   assert( pCache->pGroup->lru.isAnchor==1 );
   pCache->nRecyclable--;
+  if(pPage->from == 2){
+      pCache->pGroup->AoutSize--;
+      pCache->pGroup->AmSize++;
+  }
   pPage->from=4;
 }
 
@@ -788,7 +792,8 @@ static sqlite3_pcache *pcache1Create(int szPage, int szExtra, int bPurgeable){
     pGroup->Kin = 250;
     pGroup->Kout = 500;
     pGroup->pageSlot = 1000;
-    
+    pGroup->AinSize = pGroup->AoutSize = pGroup->AmSize = 0;
+
     pCache->pGroup = pGroup;
     pCache->szPage = szPage;
     pCache->szExtra = szExtra;
@@ -848,8 +853,62 @@ static void pcache1Shrink(sqlite3_pcache *p){
   }
 }
 
+static PgHdr1 *pcacheFifoDeque(PgHdr1 fifoList);
+
+static int pcacheFifoEnque(PgHdr1* target, u8 dest){
+    PGroup *pGroup = target->pCache->pGroup;
+    PgHdr1 *fifoList;
+    int rc = 0;
+    PgHdr1* rt;
+    if(target == NULL)
+        return 0;
+    switch(dest){
+        case 1:
+            // enque to Ain
+            pGroup->AinSize++;        
+            if(pGroup->AinSize + pGroup->AmSize > pGroup->pageSlot){
+                pcacheFifoDeque(pGroup->Aout);
+                rc = pcacheFifoEnque(pcacheFifoDeque(pGroup->Ain),2);
+            }
+            if(rc==0){
+                return 0;
+            }
+            fifoList = &pGroup->Ain;
+            break;
+        case 2:
+            // enque to Aout
+            pGroup->AoutSize++;
+            if(pGroup->AoutSize > pGroup->Kout){
+                if(pcacheFifoDeque(pGroup->Aout)==0){
+                    return 0;
+                }
+            }
+            fifoList = &pGroup->Aout;
+            break;
+            /*
+        case 4:
+            // enque to Am
+            pGroup->AmSize++;
+            if(pGroup->AinSize + pGroup->AmSize > pGroup->pageSlot){
+                if(pGroup->AinSize <= pGroup->Kin){
+                     
+                }else{
+
+                }
+            }
+            fifoList = &pGroup->lru;
+            break;
+            */
+    }
+    target->pLruNext = fifoList->pLruNext;
+    target->pLruPrev = fifoList;
+    fifoList->pLruNext->pLruPrev = target;
+    fifoList->pLruNext = target;
+    return 1;
+}
 static PgHdr1 *pcacheFifoDeque(PgHdr1 fifoList){
     PgHdr1* target = fifoList.pLruPrev;
+    PGroup *pGroup = target->pCache->pGroup;
     //find target to deque , which is not pinned
     while(!target->isPinned && target != &fifoList)
         target = target->pLruPrev;
@@ -862,6 +921,14 @@ static PgHdr1 *pcacheFifoDeque(PgHdr1 fifoList){
         target->pLruNext->pLruPrev = &fifoList;
         target->pLruPrev->pLruNext = &fifoList;
         target->pLruPrev = target->pLruNext = 0;
+    }
+    switch(target->from){
+        case 1:
+            pGroup->AinSize--;
+            break;
+        case 2:
+            pGroup->AoutSize--;
+            break;
     }
     return target;
 }
@@ -882,7 +949,7 @@ static PgHdr1* reclaimfor(PGroup* pg)
 {
   PgHdr1* res = NULL;
   //size 관리 필요 
-  //if(pg->AinSize+pg->AmSize<pg->pageSlot){return NULL}
+  if(pg->AinSize+pg->AmSize > pg->pageSlot){return NULL;}
   if(pg->AinSize > pg->Kin)
   {
     //dequeue(Ain)
@@ -893,12 +960,14 @@ static PgHdr1* reclaimfor(PGroup* pg)
     pg->Aout.pLruNext->pLruPrev = res;
     pg->Aout.pLruNext = res;
     res->pLruPrev = &pg->Aout;
+    pg->AoutSize++;
 
     if(pg->AoutSize > pg->Kout)
       res = pcacheFifoDeque(pg->Aout); 
   }
   else{
     res = pg->lru.pLruPrev;
+  
   }
   res->from=1;
   return res;
@@ -969,6 +1038,9 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
   */
   if( !pPage ){
     pPage = pcache1AllocPage(pCache, createFlag==1);
+    pPage->from = 1;
+    pPage->pCache = pCache;
+    pcacheFifoEnque(pPage,1); 
   }
 
   if( pPage ){
@@ -977,19 +1049,15 @@ static SQLITE_NOINLINE PgHdr1 *pcache1FetchStage2(
     pPage->iKey = iKey;
     pPage->pNext = pCache->apHash[h];
     pPage->pCache = pCache;
-    pPage->pLruPrev = 0;
-    pPage->pLruNext = 0;
+    if(pPage->from == 4){
+        pPage->pLruPrev = 0;
+        pPage->pLruNext = 0;
+        pPage->from = 1;
+        pGroup->AmSize--;
+    }
     pPage->isPinned = 1;
     *(void **)pPage->page.pExtra = 0;
     pCache->apHash[h] = pPage;
-    //from 에 따라 다르게 해야할듯?
-    //Ain에 넣어줌
-    /*
-    pPage->pLruNext=pGroup->AinStart;
-    pPage->pLruPrev=pGroup->AinEnd;
-    pGroup->AinStart->pLruPrev=pPage;
-    pGroup->AinEnd->pLruNext=pPage;
-    */
     if( iKey>pCache->iMaxKey ){
       pCache->iMaxKey = iKey;
     }
