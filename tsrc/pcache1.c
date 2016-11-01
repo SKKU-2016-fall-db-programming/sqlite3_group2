@@ -1233,9 +1233,6 @@ static void pcache1Unpin(
   assert( pPage->pLruPrev==0 && pPage->pLruNext==0 );
   assert( pPage->isPinned==1 );
 
-  if( reuseUnlikely || pGroup->nCurrentPage>pGroup->nMaxPage ){
-    pcache1RemoveFromHash(pPage, 1);
-  }else{
     /* Add the page to the PGroup LRU list. */
     //from이 4면 기존대로, 1이면 ispinned만
     if(pPage->from == 4)
@@ -1247,7 +1244,6 @@ static void pcache1Unpin(
       pCache->nRecyclable++;
     }
     pPage->isPinned = 0;
-  }
 
   pcache1LeaveMutex(pCache->pGroup);
 }

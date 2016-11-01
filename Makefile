@@ -15,7 +15,7 @@
 # The toplevel directory of the source tree.  This is the directory
 # that contains this "Makefile.in" and the "configure.in" script.
 #
-TOP = /home/ga/sqlite/sqlite3_group2
+TOP = /home/sysadmin/Public/sqlite3_group2
 
 # C Compiler and options for use in building executables that
 # will run on the platform that is doing the build.
@@ -42,7 +42,7 @@ TCC += -D_HAVE_SQLITE_CONFIG_H -DBUILD_sqlite
 # Omitting the define will cause extra debugging code to be inserted and
 # includes extra comments when "EXPLAIN stmt" is used.
 #
-TCC += -DNDEBUG
+TCC += -DNDEBUG -DSQLITE_DEFAULT_CACHE_SIZE=1500
 
 # Compiler options needed for programs that use the TCL library.
 #
