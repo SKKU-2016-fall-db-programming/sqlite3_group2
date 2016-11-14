@@ -8050,25 +8050,34 @@ int sqlite3BtreeInsert(
     memcpy(undo_log, &(cellinfo.nKey), sizeof(i64));
     memcpy(undo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
 
-    pPage->xParseCell(pPage, newCell, &cellinfo);
-    redo_s = sizeof(char)*cellinfo.nPayload + sizeof(i64);
-    redo_log = (char*)malloc(redo_s);
-    memcpy(redo_log, &(cellinfo.nKey), sizeof(i64));
-    memcpy(redo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
-
-    sqlite3Log(pPage->pgno, loc==0?2:1, redo_s, redo_log, undo_s, undo_log);
-    free(redo_log);
-    free(undo_log);
-
     rc = clearCell(pPage, oldCell, &szOld);
     dropCell(pPage, idx, szOld, &rc);
     if( rc ) goto end_insert;
   }else if( loc<0 && pPage->nCell>0 ){
-    assert( pPage->leaf );
-    idx = ++pCur->aiIdx[pCur->iPage];
+	  assert( pPage->leaf );
+	  idx = ++pCur->aiIdx[pCur->iPage];
   }else{
-    assert( pPage->leaf );
+	  assert( pPage->leaf );
   }
+
+  //redo for update and insert
+  pPage->xParseCell(pPage, newCell, &cellinfo);
+  redo_s = sizeof(char)*cellinfo.nPayload + sizeof(i64);
+  redo_log = (char*)malloc(redo_s);
+  memcpy(redo_log, &(cellinfo.nKey), sizeof(i64));
+  memcpy(redo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
+
+  //printf("%s", cellinfo.pPayload);
+  if(loc != 0){
+	  undo_s = sizeof(i64);
+	  undo_log = (char*)malloc(undo_s);
+	  memcpy(undo_log, &(cellinfo.nKey), sizeof(i64));
+  }
+
+  sqlite3Log(pPage->pgno, loc==0?2:1, redo_s, redo_log, undo_s, undo_log);
+  free(redo_log);
+  free(undo_log);
+
   insertCell(pPage, idx, newCell, szNew, 0, 0, &rc);
   assert( pPage->nOverflow==0 || rc==SQLITE_OK );
   assert( rc!=SQLITE_OK || pPage->nCell>0 || pPage->nOverflow>0 );
