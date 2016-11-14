@@ -8047,16 +8047,18 @@ int sqlite3BtreeInsert(
     pPage->xParseCell(pPage, oldCell, &cellinfo);
     undo_s = sizeof(char)*cellinfo.nPayload + sizeof(i64);
     undo_log = (char*)malloc(undo_s);
-    memcpy(undo_log, cellinfo.nKey, sizeof(i64));
+    memcpy(undo_log, &(cellinfo.nKey), sizeof(i64));
     memcpy(undo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
 
     pPage->xParseCell(pPage, newCell, &cellinfo);
     redo_s = sizeof(char)*cellinfo.nPayload + sizeof(i64);
     redo_log = (char*)malloc(redo_s);
-    memcpy(redo_log, cellinfo.nKey, sizeof(i64));
+    memcpy(redo_log, &(cellinfo.nKey), sizeof(i64));
     memcpy(redo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
 
     sqlite3Log(pPage->pgno, loc==0?2:1, redo_s, redo_log, undo_s, undo_log);
+    free(redo_log);
+    free(undo_log);
 
     rc = clearCell(pPage, oldCell, &szOld);
     dropCell(pPage, idx, szOld, &rc);
@@ -8107,8 +8109,6 @@ int sqlite3BtreeInsert(
   assert( pCur->apPage[pCur->iPage]->nOverflow==0 );
 
 end_insert:
-  free(undo_log);
-  free(redo_log);
   return rc;
 }
 
@@ -8226,6 +8226,7 @@ int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
   char redo_log [redo_log_size];
   memcpy(redo_log, &((&info)->nKey),sizeof(i64));
   memcpy(redo_log+sizeof(i64),(&info)->pPayload,(&info)->nPayload);
+
   sqlite3Log(pPage->pgno,3,redo_log_size, redo_log,undo_log_size,undo_log);
 
   if( rc ) return rc;
