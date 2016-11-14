@@ -3255,7 +3255,7 @@ int sqlite3BtreeBeginTrans(Btree *p, int wrflag){
     }
   }
 
-  sqlite3Log(0,0,"","");
+  sqlite3Log(0,0,0,"",0,"");
 trans_begun:
   if( rc==SQLITE_OK && wrflag ){
     /* This call makes sure that the pager has the correct number of
@@ -3840,7 +3840,7 @@ int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 
   btreeEndTransaction(p);
   sqlite3BtreeLeave(p);
-  sqlite3Log(0,4,"","");
+  sqlite3Log(0,4,0,"",0,"");
   return SQLITE_OK;
 }
 
@@ -8190,22 +8190,22 @@ int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
   if( rc ) return rc;
   //redo & undo log make
   CellInfo info;
+
   pPage->xParseCell(pPage, pCell, (&info));
-  char undo_log [sizeof(i64) + (&info)->nPayload+1];
+  int undo_log_size = sizeof(i64) + (&info)->nPayload;
+  char undo_log [undo_log_size];
   memcpy(undo_log, &((&info)->nKey),sizeof(i64));
   memcpy(undo_log+sizeof(i64),(&info)->pPayload,(&info)->nPayload);
-  undo_log[sizeof(i64) + (&info)->nPayload] = 0x00;
 
   rc = clearCell(pPage, pCell, &szCell);
   dropCell(pPage, iCellIdx, szCell, &rc);
 
   pPage->xParseCell(pPage, pCell, &info);
-  char redo_log [sizeof(i64) + (&info)->nPayload+1];
+  int redo_log_size = sizeof(i64) + (&info)->nPayload;
+  char redo_log [redo_log_size];
   memcpy(redo_log, &((&info)->nKey),sizeof(i64));
   memcpy(redo_log+sizeof(i64),(&info)->pPayload,(&info)->nPayload);
-  redo_log[sizeof(i64) + (&info)->nPayload] = 0x00;
-  printf("%s %s\n",redo_log, undo_log);
-  sqlite3Log(pPage->pgno,3,redo_log, undo_log);
+  sqlite3Log(pPage->pgno,3,redo_log_size, redo_log,undo_log_size,undo_log);
 
   if( rc ) return rc;
 
