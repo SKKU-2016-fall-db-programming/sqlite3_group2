@@ -15,7 +15,10 @@
 ** accessed by users of the library.
 */
 #include "sqliteInt.h"
-
+#include "sqliteLog.h"
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #ifdef SQLITE_ENABLE_FTS3
 # include "fts3.h"
 #endif
@@ -3077,6 +3080,24 @@ int sqlite3_open(
   const char *zFilename, 
   sqlite3 **ppDb 
 ){
+  #ifdef SQLITE_LOGGING
+  char logFilename[40];
+  strncpy(logFilename,zFilename,36);
+  int logNameLen = strlen(logFilename);
+  strcat(logFilename, ".log");
+  log_fd = open(logFilename, O_RDWR | O_CREAT, 0644);
+  if(log_fd < 0){
+    fprintf(stderr, "LOG FILE OPEN ERROR\n");
+  }else{
+    ftruncate(log_fd,1024*4096);
+  }
+  log_buffer = (void*) mmap(NULL, 1024*4096, PROT_READ | PROT_WRITE, MAP_SHARED, log_fd,0);
+  memset(log_buffer, 0x00, 1024*4096);
+  msync(log_buffer, 1024*4096, MS_SYNC);
+  if(log_buffer == MAP_FAILED){
+    fprintf(stderr, "LOG FILE MAPPING ERROR\n");
+  }
+  #endif
   return openDatabase(zFilename, ppDb,
                       SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0);
 }

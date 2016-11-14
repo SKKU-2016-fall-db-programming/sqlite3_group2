@@ -4261,4 +4261,8 @@ int sqlite3ThreadJoin(SQLiteThread*, void**);
 int sqlite3DbstatRegister(sqlite3*);
 #endif
 
+#ifdef SQLITE_LOGGING
+    extern int log_fd;
+    extern void* log_buffer;
+#endif
 #endif /* SQLITEINT_H */

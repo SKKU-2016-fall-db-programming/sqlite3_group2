@@ -14,6 +14,7 @@
 ** Including a description of file format and an overview of operation.
 */
 #include "btreeInt.h"
+#include "sqliteLog.h"
 
 /*
 ** The header string that appears at the beginning of every
@@ -3266,6 +3267,7 @@ trans_begun:
 
   btreeIntegrity(p);
   sqlite3BtreeLeave(p);
+  sqlite3Log(0,0,"","");
   return rc;
 }
 
