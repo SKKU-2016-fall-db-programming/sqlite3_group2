@@ -720,7 +720,7 @@ void sqlite3Log(Pgno pgno,int opcode, const char *redo_log, const char *undo_log
     }
     int log_size = sizeof(Pgno) + sizeof(int)*3 + strlen(redo_log) + strlen(undo_log) + 2;
     void* log = malloc(log_size);
-    printf("%u %d %d %s %s %d\n", lastLsn, pgno, opcode, redo_log, undo_log, log_size);
+    printf("log : %u %d %d %s %s %d\n", lastLsn, pgno, opcode, redo_log, undo_log, log_size);
     int tmp_size = 0;
     memcpy(log, &lastLsn, sizeof(int));
     lastLsn+=1;
@@ -741,9 +741,9 @@ void sqlite3Log(Pgno pgno,int opcode, const char *redo_log, const char *undo_log
         msync(old_log_buffer, log_buffer - old_log_buffer + log_size , MS_SYNC);
         old_log_buffer = log_buffer + log_size;
     }
+    log_buffer+=log_size;
     //write(log_fd, log, log_size);
     free(log);
-    fprintf(stderr, "write log\n");
 };
 
 
