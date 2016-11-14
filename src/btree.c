@@ -7956,6 +7956,11 @@ int sqlite3BtreeInsert(
   BtShared *pBt = p->pBt;
   unsigned char *oldCell;
   unsigned char *newCell = 0;
+  char * redo_log;
+  char * undo_log;
+  CellInfo cellinfo;
+  int redo_s, undo_s;
+
 
   if( pCur->eState==CURSOR_FAULT ){
     assert( pCur->skipNext!=SQLITE_OK );
@@ -8039,6 +8044,20 @@ int sqlite3BtreeInsert(
     if( !pPage->leaf ){
       memcpy(newCell, oldCell, 4);
     }
+    pPage->xParseCell(pPage, oldCell, &cellinfo);
+    undo_s = sizeof(char)*cellinfo.nPayload + sizeof(i64);
+    undo_log = (char*)malloc(undo_s);
+    memcpy(undo_log, cellinfo.nKey, sizeof(i64));
+    memcpy(undo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
+
+    pPage->xParseCell(pPage, newCell, &cellinfo);
+    redo_s = sizeof(char)*cellinfo.nPayload + sizeof(i64);
+    redo_log = (char*)malloc(redo_s);
+    memcpy(redo_log, cellinfo.nKey, sizeof(i64));
+    memcpy(redo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
+
+    sqlite3Log(pPage->pgno, loc==0?2:1, redo_s, redo_log, undo_s, undo_log);
+
     rc = clearCell(pPage, oldCell, &szOld);
     dropCell(pPage, idx, szOld, &rc);
     if( rc ) goto end_insert;
@@ -8088,6 +8107,8 @@ int sqlite3BtreeInsert(
   assert( pCur->apPage[pCur->iPage]->nOverflow==0 );
 
 end_insert:
+  free(undo_log);
+  free(redo_log);
   return rc;
 }
 
