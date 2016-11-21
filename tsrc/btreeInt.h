@@ -707,16 +707,22 @@ struct IntegrityCk {
 # define get2byteAligned(x)  ((x)[0]<<8 | (x)[1])
 #endif
 
+int p_check;
 extern int log_fd;
 extern void *log_buffer;
 extern unsigned int lastLsn; 
 /*
  * function for physio-logical logging
  * */
-void sqlite3Log(Pgno pgno,int opcode, const char *redo_log, const char *undo_log){
-    int log_size = sizeof(Pgno) + sizeof(int)*3 + strlen(redo_log) + strlen(undo_log) + 2;
+void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int undo_size,const char *undo_log){
+    static void * old_log_buffer;
+    if(opcode == 0){
+        old_log_buffer = log_buffer;
+    }
+    int log_size = sizeof(Pgno) + sizeof(int)*3 + sizeof(int)*2 + undo_size + redo_size;
     void* log = malloc(log_size);
-    printf("%u %d %d %s %s %d\n", lastLsn, pgno, opcode, redo_log, undo_log, log_size);
+    printf("log : %u %d %d %d %d %d %d\n", lastLsn, pgno, opcode, redo_size, undo_size, log_size, p_check);
+    p_check++;
     int tmp_size = 0;
     memcpy(log, &lastLsn, sizeof(int));
     lastLsn+=1;
@@ -727,17 +733,22 @@ void sqlite3Log(Pgno pgno,int opcode, const char *redo_log, const char *undo_log
     tmp_size+= sizeof(int);
     memcpy(log+tmp_size, &log_size, sizeof(int));
     tmp_size+= sizeof(int);
-    memcpy(log+tmp_size, redo_log,strlen(redo_log)+1);
-    tmp_size+=(strlen(redo_log)+1);
-    memcpy(log+tmp_size, undo_log,strlen(undo_log)+1);
-    tmp_size+=(strlen(undo_log)+1);
+    memcpy(log+tmp_size, &redo_size,sizeof(int));
+    tmp_size+= sizeof(int);
+    memcpy(log+tmp_size, redo_log, redo_size);
+    tmp_size+= redo_size;
+    memcpy(log+tmp_size, &undo_size,sizeof(int));
+    tmp_size+= sizeof(int);
+    memcpy(log+tmp_size, undo_log, undo_size);
     memcpy(log_buffer, log, log_size);
     //after msync need processing
-    msync(log_buffer, log_size , MS_SYNC);
+    if(opcode == 4){
+        msync(old_log_buffer, log_buffer - old_log_buffer + log_size , MS_SYNC);
+        old_log_buffer = log_buffer + log_size;
+    }
     log_buffer+=log_size;
     //write(log_fd, log, log_size);
     free(log);
-    fprintf(stderr, "write log\n");
 };
 
 

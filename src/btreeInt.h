@@ -707,6 +707,7 @@ struct IntegrityCk {
 # define get2byteAligned(x)  ((x)[0]<<8 | (x)[1])
 #endif
 
+int p_check;
 extern int log_fd;
 extern void *log_buffer;
 extern unsigned int lastLsn; 
@@ -720,7 +721,8 @@ void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int u
     }
     int log_size = sizeof(Pgno) + sizeof(int)*3 + sizeof(int)*2 + undo_size + redo_size;
     void* log = malloc(log_size);
-    printf("log : %u %d %d %d %d %d\n", lastLsn, pgno, opcode, redo_size, undo_size, log_size);
+    printf("log : %u %d %d %d %d %d %d\n", lastLsn, pgno, opcode, redo_size, undo_size, log_size, p_check);
+    p_check++;
     int tmp_size = 0;
     memcpy(log, &lastLsn, sizeof(int));
     lastLsn+=1;

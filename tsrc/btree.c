@@ -15,7 +15,7 @@
 */
 #include "btreeInt.h"
 #include "sqliteLog.h"
-
+extern int pragma_check;
 /*
 ** The header string that appears at the beginning of every
 ** SQLite database.
@@ -3255,7 +3255,7 @@ int sqlite3BtreeBeginTrans(Btree *p, int wrflag){
     }
   }
 
-
+  sqlite3Log(0,0,0,"",0,"");
 trans_begun:
   if( rc==SQLITE_OK && wrflag ){
     /* This call makes sure that the pager has the correct number of
@@ -3267,7 +3267,6 @@ trans_begun:
 
   btreeIntegrity(p);
   sqlite3BtreeLeave(p);
-  sqlite3Log(0,0,"","");
   return rc;
 }
 
@@ -3728,6 +3727,7 @@ static int autoVacuumCommit(BtShared *pBt){
 */
 int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zMaster){
   int rc = SQLITE_OK;
+  if(p_check >= 10 || pragma_check == 1){
   if( p->inTrans==TRANS_WRITE ){
     BtShared *pBt = p->pBt;
     sqlite3BtreeEnter(p);
@@ -3745,6 +3745,7 @@ int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zMaster){
 #endif
     rc = sqlite3PagerCommitPhaseOne(pBt->pPager, zMaster, 0);
     sqlite3BtreeLeave(p);
+  }
   }
   return rc;
 }
@@ -3817,30 +3818,35 @@ static void btreeEndTransaction(Btree *p){
 */
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 
-  if( p->inTrans==TRANS_NONE ) return SQLITE_OK;
-  sqlite3BtreeEnter(p);
-  btreeIntegrity(p);
+  if(p_check >= 10 ||  pragma_check ==1){
+      pragma_check = 0;
+      p_check = 0;
+      if( p->inTrans==TRANS_NONE ) return SQLITE_OK;
+      sqlite3BtreeEnter(p);
+      btreeIntegrity(p);
 
-  /* If the handle has a write-transaction open, commit the shared-btrees 
-  ** transaction and set the shared state to TRANS_READ.
-  */
-  if( p->inTrans==TRANS_WRITE ){
-    int rc;
-    BtShared *pBt = p->pBt;
-    assert( pBt->inTransaction==TRANS_WRITE );
-    assert( pBt->nTransaction>0 );
-    rc = sqlite3PagerCommitPhaseTwo(pBt->pPager);
-    if( rc!=SQLITE_OK && bCleanup==0 ){
+      /* If the handle has a write-transaction open, commit the shared-btrees 
+      ** transaction and set the shared state to TRANS_READ.
+      */
+      if( p->inTrans==TRANS_WRITE ){
+        int rc;
+        BtShared *pBt = p->pBt;
+        assert( pBt->inTransaction==TRANS_WRITE );
+        assert( pBt->nTransaction>0 );
+        rc = sqlite3PagerCommitPhaseTwo(pBt->pPager);
+        if( rc!=SQLITE_OK && bCleanup==0 ){
+          sqlite3BtreeLeave(p);
+          return rc;
+        }
+        p->iDataVersion--;  /* Compensate for pPager->iDataVersion++; */
+        pBt->inTransaction = TRANS_READ;
+        btreeClearHasContent(pBt);
+      }
+
+      btreeEndTransaction(p);
       sqlite3BtreeLeave(p);
-      return rc;
-    }
-    p->iDataVersion--;  /* Compensate for pPager->iDataVersion++; */
-    pBt->inTransaction = TRANS_READ;
-    btreeClearHasContent(pBt);
   }
-
-  btreeEndTransaction(p);
-  sqlite3BtreeLeave(p);
+  sqlite3Log(0,4,0,"",0,"");
   return SQLITE_OK;
 }
 
@@ -7956,6 +7962,11 @@ int sqlite3BtreeInsert(
   BtShared *pBt = p->pBt;
   unsigned char *oldCell;
   unsigned char *newCell = 0;
+  char * redo_log;
+  char * undo_log;
+  CellInfo cellinfo;
+  int redo_s, undo_s;
+
 
   if( pCur->eState==CURSOR_FAULT ){
     assert( pCur->skipNext!=SQLITE_OK );
@@ -8039,15 +8050,40 @@ int sqlite3BtreeInsert(
     if( !pPage->leaf ){
       memcpy(newCell, oldCell, 4);
     }
+    pPage->xParseCell(pPage, oldCell, &cellinfo);
+    undo_s = sizeof(char)*cellinfo.nPayload + sizeof(i64);
+    undo_log = (char*)malloc(undo_s);
+    memcpy(undo_log, &(cellinfo.nKey), sizeof(i64));
+    memcpy(undo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
+
     rc = clearCell(pPage, oldCell, &szOld);
     dropCell(pPage, idx, szOld, &rc);
     if( rc ) goto end_insert;
   }else if( loc<0 && pPage->nCell>0 ){
-    assert( pPage->leaf );
-    idx = ++pCur->aiIdx[pCur->iPage];
+	  assert( pPage->leaf );
+	  idx = ++pCur->aiIdx[pCur->iPage];
   }else{
-    assert( pPage->leaf );
+	  assert( pPage->leaf );
   }
+
+  //redo for update and insert
+  pPage->xParseCell(pPage, newCell, &cellinfo);
+  redo_s = sizeof(char)*cellinfo.nPayload + sizeof(i64);
+  redo_log = (char*)malloc(redo_s);
+  memcpy(redo_log, &(cellinfo.nKey), sizeof(i64));
+  memcpy(redo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
+
+  //printf("%s", cellinfo.pPayload);
+  if(loc != 0){
+	  undo_s = sizeof(i64);
+	  undo_log = (char*)malloc(undo_s);
+	  memcpy(undo_log, &(cellinfo.nKey), sizeof(i64));
+  }
+
+  sqlite3Log(pPage->pgno, loc==0?2:1, redo_s, redo_log, undo_s, undo_log);
+  free(redo_log);
+  free(undo_log);
+
   insertCell(pPage, idx, newCell, szNew, 0, 0, &rc);
   assert( pPage->nOverflow==0 || rc==SQLITE_OK );
   assert( rc!=SQLITE_OK || pPage->nCell>0 || pPage->nOverflow>0 );
@@ -8188,8 +8224,26 @@ int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
   ** itself from within the page.  */
   rc = sqlite3PagerWrite(pPage->pDbPage);
   if( rc ) return rc;
+  //redo & undo log make
+  CellInfo info;
+
+  pPage->xParseCell(pPage, pCell, (&info));
+  int undo_log_size = sizeof(i64) + (&info)->nPayload;
+  char undo_log [undo_log_size];
+  memcpy(undo_log, &((&info)->nKey),sizeof(i64));
+  memcpy(undo_log+sizeof(i64),(&info)->pPayload,(&info)->nPayload);
+
   rc = clearCell(pPage, pCell, &szCell);
   dropCell(pPage, iCellIdx, szCell, &rc);
+
+  pPage->xParseCell(pPage, pCell, &info);
+  int redo_log_size = sizeof(i64) + (&info)->nPayload;
+  char redo_log [redo_log_size];
+  memcpy(redo_log, &((&info)->nKey),sizeof(i64));
+  memcpy(redo_log+sizeof(i64),(&info)->pPayload,(&info)->nPayload);
+
+  sqlite3Log(pPage->pgno,3,redo_log_size, redo_log,undo_log_size,undo_log);
+
   if( rc ) return rc;
 
   /* If the cell deleted was not located on a leaf page, then the cursor

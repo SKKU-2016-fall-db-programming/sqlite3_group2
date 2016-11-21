@@ -15,7 +15,7 @@
 */
 #include "btreeInt.h"
 #include "sqliteLog.h"
-
+extern int pragma_check;
 /*
 ** The header string that appears at the beginning of every
 ** SQLite database.
@@ -3727,6 +3727,7 @@ static int autoVacuumCommit(BtShared *pBt){
 */
 int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zMaster){
   int rc = SQLITE_OK;
+  if(p_check >= 10 || pragma_check == 1){
   if( p->inTrans==TRANS_WRITE ){
     BtShared *pBt = p->pBt;
     sqlite3BtreeEnter(p);
@@ -3744,6 +3745,7 @@ int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zMaster){
 #endif
     rc = sqlite3PagerCommitPhaseOne(pBt->pPager, zMaster, 0);
     sqlite3BtreeLeave(p);
+  }
   }
   return rc;
 }
@@ -3816,30 +3818,34 @@ static void btreeEndTransaction(Btree *p){
 */
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 
-  if( p->inTrans==TRANS_NONE ) return SQLITE_OK;
-  sqlite3BtreeEnter(p);
-  btreeIntegrity(p);
+  if(p_check >= 10 ||  pragma_check ==1){
+      pragma_check = 0;
+      p_check = 0;
+      if( p->inTrans==TRANS_NONE ) return SQLITE_OK;
+      sqlite3BtreeEnter(p);
+      btreeIntegrity(p);
 
-  /* If the handle has a write-transaction open, commit the shared-btrees 
-  ** transaction and set the shared state to TRANS_READ.
-  */
-  if( p->inTrans==TRANS_WRITE ){
-    int rc;
-    BtShared *pBt = p->pBt;
-    assert( pBt->inTransaction==TRANS_WRITE );
-    assert( pBt->nTransaction>0 );
-    rc = sqlite3PagerCommitPhaseTwo(pBt->pPager);
-    if( rc!=SQLITE_OK && bCleanup==0 ){
+      /* If the handle has a write-transaction open, commit the shared-btrees 
+      ** transaction and set the shared state to TRANS_READ.
+      */
+      if( p->inTrans==TRANS_WRITE ){
+        int rc;
+        BtShared *pBt = p->pBt;
+        assert( pBt->inTransaction==TRANS_WRITE );
+        assert( pBt->nTransaction>0 );
+        rc = sqlite3PagerCommitPhaseTwo(pBt->pPager);
+        if( rc!=SQLITE_OK && bCleanup==0 ){
+          sqlite3BtreeLeave(p);
+          return rc;
+        }
+        p->iDataVersion--;  /* Compensate for pPager->iDataVersion++; */
+        pBt->inTransaction = TRANS_READ;
+        btreeClearHasContent(pBt);
+      }
+
+      btreeEndTransaction(p);
       sqlite3BtreeLeave(p);
-      return rc;
-    }
-    p->iDataVersion--;  /* Compensate for pPager->iDataVersion++; */
-    pBt->inTransaction = TRANS_READ;
-    btreeClearHasContent(pBt);
   }
-
-  btreeEndTransaction(p);
-  sqlite3BtreeLeave(p);
   sqlite3Log(0,4,0,"",0,"");
   return SQLITE_OK;
 }
