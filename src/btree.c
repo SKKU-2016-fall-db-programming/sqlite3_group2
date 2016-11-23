@@ -3254,8 +3254,7 @@ int sqlite3BtreeBeginTrans(Btree *p, int wrflag){
       }
     }
   }
-
-  sqlite3Log(0,0,0,"",0,"");
+  //sqlite3Log(0,0,0,"",0,"");
 trans_begun:
   if( rc==SQLITE_OK && wrflag ){
     /* This call makes sure that the pager has the correct number of
@@ -3264,6 +3263,7 @@ trans_begun:
     */
     rc = sqlite3PagerOpenSavepoint(pBt->pPager, p->db->nSavepoint);
   }
+  sqlite3Log(pBt->nPage,0,0,"",0,"");
 
   btreeIntegrity(p);
   sqlite3BtreeLeave(p);

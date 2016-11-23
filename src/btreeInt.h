@@ -725,13 +725,13 @@ void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int u
     p_check++;
     int tmp_size = 0;
     memcpy(log, &lastLsn, sizeof(int));
-    lastLsn+=1;
+    lastLsn+=log_size;
     tmp_size+=sizeof(int);
-    memcpy(log+tmp_size, &pgno, sizeof(Pgno));
+    memcpy(log+tmp_size, &log_size, sizeof(int));
     tmp_size+= sizeof(Pgno);
     memcpy(log+tmp_size, &opcode, sizeof(int));
     tmp_size+= sizeof(int);
-    memcpy(log+tmp_size, &log_size, sizeof(int));
+    memcpy(log+tmp_size, &pgno, sizeof(Pgno));
     tmp_size+= sizeof(int);
     memcpy(log+tmp_size, &redo_size,sizeof(int));
     tmp_size+= sizeof(int);
