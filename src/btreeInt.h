@@ -714,7 +714,11 @@ extern unsigned int lastLsn;
 /*
  * function for physio-logical logging
  * */
+//to save origin log buffer 
+void * origin_log_buffer = NULL;
 void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int undo_size,const char *undo_log){
+    if(origin_log_buffer == NULL)
+	origin_log_buffer = log_buffer;
     static void * old_log_buffer;
     if(opcode == 0){
         old_log_buffer = log_buffer;

@@ -3818,6 +3818,7 @@ static void btreeEndTransaction(Btree *p){
 */
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 
+  sqlite3Log(0,4,0,"",0,""); 
   if(p_check >= 10 ||  pragma_check ==1){
       pragma_check = 0;
       p_check = 0;
@@ -3845,9 +3846,16 @@ int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 
       btreeEndTransaction(p);
       sqlite3BtreeLeave(p);
+      log_buffer = origin_log_buffer;
+      memset(log_buffer, 0x00, 1024*4096);
+      msync(log_buffer, 1024 * 4096, MS_SYNC);
+      if(log_buffer == MAP_FAILED){
+	fprintf(stderr, "LOG FILE MAPPING ERROR\n");
+      }
   }
-  sqlite3Log(0,4,0,"",0,"");
+  //sqlite3Log(0,4,0,"",0,"");
   return SQLITE_OK;
+
 }
 
 /*
