@@ -15,6 +15,8 @@
 ** accessed by users of the library.
 */
 #include "sqliteInt.h"
+#include "btreeInt.h"
+#include "btree.h"
 #include "sqliteLog.h"
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -2927,12 +2929,8 @@ static int openDatabase(
     goto opendb_out;
   }
   sqlite3BtreeEnter(db->aDb[0].pBt);
-  db->aDb[0].pSchema = sqlite3SchemaGet(db, db->aDb[0].pBt);
-  if( !db->mallocFailed ) ENC(db) = SCHEMA_ENC(db);
   sqlite3BtreeLeave(db->aDb[0].pBt);
   db->aDb[1].pSchema = sqlite3SchemaGet(db, 0);
-  /*test haha*/
-
   /* The default safety_level for the main database is FULL; for the temp
   ** database it is OFF. This matches the pager layer defaults.  
   */
@@ -2942,6 +2940,83 @@ static int openDatabase(
   db->aDb[1].safety_level = PAGER_SYNCHRONOUS_OFF;
 
   db->magic = SQLITE_MAGIC_OPEN;
+
+  char tempsql0[100]="PRAGMA journal_mode=wal;";
+  char tempsql1[100]="select * from test;";
+  sqlite3_exec(db,tempsql0,0,0, &zErrMsg);
+  sqlite3_exec(db,tempsql1,0,0, &zErrMsg);
+  sqlite3BtreeEnter(db->aDb[0].pBt);
+  allocateTempSpace(db->aDb[0].pBt->pBt);
+  db->aDb[0].pSchema = sqlite3SchemaGet(db, db->aDb[0].pBt);
+  if( !db->mallocFailed ) ENC(db) = SCHEMA_ENC(db);
+  
+  /*
+   *sqlite3btreeenter
+   *btreegetpage
+   *insertcell
+   *sqlite3btreeleave
+   * */
+
+  Pager* pager = sqlite3BtreePager(db->aDb[0].pBt);
+  int lastLsn, log_size, opcode, redo_size, undo_size,idx, szNew;
+  i64 nKey;
+  char *redo_log, *undo_log;
+  unsigned char *newCell;
+  BtreePayload *pX;
+  DbPage* dbPage;
+  MemPage* pPage;
+  Pgno pgno;
+  while(1){
+    memcpy(&log_size,log_buffer,sizeof(int));
+    printf("REcovery log %d\n",log_size);
+    if(log_size == 0)
+        break;
+    log_buffer+=sizeof(int);
+    memcpy(&lastLsn,log_buffer,sizeof(int));
+    log_buffer+=sizeof(int);
+    memcpy(&opcode,log_buffer,sizeof(int));
+    log_buffer+=sizeof(int);
+    memcpy(&pgno,log_buffer, sizeof(Pgno));
+    log_buffer+=sizeof(Pgno);
+    memcpy(&redo_size,log_buffer,sizeof(int));
+    log_buffer+=sizeof(int);
+    redo_log = (char*)malloc(sizeof(char)*redo_size);
+    memcpy(redo_log, log_buffer,sizeof(char)*redo_size);
+    log_buffer+=sizeof(char)*redo_size;
+    memcpy(&undo_size,log_buffer,sizeof(int));
+    log_buffer+=sizeof(int);
+    undo_log = (char*)malloc(sizeof(char)*undo_size);
+    memcpy(undo_log, log_buffer,sizeof(char)*undo_size);
+    log_buffer+=sizeof(char)*undo_size;
+    if(opcode != 1)
+        continue;
+    btreeGetPage(db->aDb[0].pBt->pBt, 1, &(db->aDb[0].pBt->pBt->pPage1), 0);
+    printf("REcovery start\n");
+    sqlite3PagerGet(pager, pgno, &dbPage, 0);
+    pPage = btreePageFromDbPage(dbPage, pgno, db->aDb[0].pBt->pBt);
+
+    printf("pBt %p\n",db->aDb[0].pBt->pBt);
+    newCell = db->aDb[0].pBt->pBt->pTmpSpace;
+    //pX init
+    pX->nData = redo_size - sizeof(i64) - sizeof(int);
+   
+    memcpy(&nKey,redo_log,sizeof(i64));
+    memcpy(&idx, redo_log+sizeof(i64),sizeof(int)); 
+    
+    pX->pKey = 0;
+    pX->nKey = nKey;
+    pX->pData = redo_log+sizeof(i64)+sizeof(int);
+    pX->nZero = 0;
+    fillInCell(pPage, newCell, pX, &szNew);
+    insertCell(pPage, idx, newCell, szNew, 0, 0, &rc);
+  }
+  log_buffer = origin_log_buffer;
+  memset(log_buffer, 0x00, 1024*4096);
+  msync(log_buffer, 1024*4096, MS_SYNC);
+
+  sqlite3BtreeLeave(db->aDb[0].pBt);
+
+
   if( db->mallocFailed ){
     goto opendb_out;
   }
@@ -3092,15 +3167,16 @@ int sqlite3_open(
   }else{
     ftruncate(log_fd,1024*4096);
   }
-  log_buffer = (void*) mmap(NULL, 1024*4096, PROT_READ | PROT_WRITE, MAP_SHARED, log_fd,0);
-  memset(log_buffer, 0x00, 1024*4096);
-  msync(log_buffer, 1024*4096, MS_SYNC);
+  origin_log_buffer = log_buffer = (void*) mmap(NULL, 1024*4096, PROT_READ | PROT_WRITE, MAP_SHARED, log_fd,0);
+  //memset(log_buffer, 0x00, 1024*4096);
+  //msync(log_buffer, 1024*4096, MS_SYNC);
   if(log_buffer == MAP_FAILED){
     fprintf(stderr, "LOG FILE MAPPING ERROR\n");
   }
   #endif
   return openDatabase(zFilename, ppDb,
                       SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0);
+
 }
 int sqlite3_open_v2(
   const char *filename,   /* Database filename (UTF-8) */
