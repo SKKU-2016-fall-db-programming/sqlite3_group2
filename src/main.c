@@ -2931,6 +2931,7 @@ static int openDatabase(
   if( !db->mallocFailed ) ENC(db) = SCHEMA_ENC(db);
   sqlite3BtreeLeave(db->aDb[0].pBt);
   db->aDb[1].pSchema = sqlite3SchemaGet(db, 0);
+  /*test haha*/
 
   /* The default safety_level for the main database is FULL; for the temp
   ** database it is OFF. This matches the pager layer defaults.  
