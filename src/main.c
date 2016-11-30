@@ -16,7 +16,6 @@
 */
 #include "sqliteInt.h"
 #include "btreeInt.h"
-#include "btree.h"
 #include "sqliteLog.h"
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -2929,6 +2928,10 @@ static int openDatabase(
     goto opendb_out;
   }
   sqlite3BtreeEnter(db->aDb[0].pBt);
+
+  db->aDb[0].pSchema = sqlite3SchemaGet(db, db->aDb[0].pBt);
+  if( !db->mallocFailed ) ENC(db) = SCHEMA_ENC(db);
+
   sqlite3BtreeLeave(db->aDb[0].pBt);
   db->aDb[1].pSchema = sqlite3SchemaGet(db, 0);
   /* The default safety_level for the main database is FULL; for the temp
@@ -2941,29 +2944,39 @@ static int openDatabase(
 
   db->magic = SQLITE_MAGIC_OPEN;
 
+  if( db->mallocFailed ){
+    goto opendb_out;
+  }
+
+  /* Register all built-in functions, but do not attempt to read the
+  ** database schema yet. This is delayed until the first time the database
+  ** is accessed.
+  */
+  sqlite3Error(db, SQLITE_OK);
+  sqlite3RegisterPerConnectionBuiltinFunctions(db);
+
+  /* Load automatic extensions - extensions that have been registered
+  ** using the sqlite3_automatic_extension() API.
+  */
+  rc = sqlite3_errcode(db);
+  if( rc==SQLITE_OK ){
+    sqlite3AutoLoadExtensions(db);
+    rc = sqlite3_errcode(db);
+    if( rc!=SQLITE_OK ){
+      goto opendb_out;
+    }
+  }
+
+  is_open = 1;
   char tempsql0[100]="PRAGMA journal_mode=wal;";
   char tempsql1[100]="select * from test;";
   sqlite3_exec(db,tempsql0,0,0, &zErrMsg);
   sqlite3_exec(db,tempsql1,0,0, &zErrMsg);
-  sqlite3BtreeEnter(db->aDb[0].pBt);
-  allocateTempSpace(db->aDb[0].pBt->pBt);
-  db->aDb[0].pSchema = sqlite3SchemaGet(db, db->aDb[0].pBt);
-  if( !db->mallocFailed ) ENC(db) = SCHEMA_ENC(db);
+  is_open = 0;
+  //revovery start
   
-  /*
-   *sqlite3btreeenter
-   *btreegetpage
-   *insertcell
-   *sqlite3btreeleave
-   * */
-
-  Pager* pager = sqlite3BtreePager(db->aDb[0].pBt);
   int lastLsn, log_size, opcode, redo_size, undo_size,idx, szNew;
-  i64 nKey;
   char *redo_log, *undo_log;
-  unsigned char *newCell;
-  BtreePayload *pX;
-  DbPage* dbPage;
   MemPage* pPage;
   Pgno pgno;
   while(1){
@@ -2990,55 +3003,29 @@ static int openDatabase(
     log_buffer+=sizeof(char)*undo_size;
     if(opcode != 1)
         continue;
-    btreeGetPage(db->aDb[0].pBt->pBt, 1, &(db->aDb[0].pBt->pBt->pPage1), 0);
-    printf("REcovery start\n");
-    sqlite3PagerGet(pager, pgno, &dbPage, 0);
-    pPage = btreePageFromDbPage(dbPage, pgno, db->aDb[0].pBt->pBt);
 
-    printf("pBt %p\n",db->aDb[0].pBt->pBt);
-    newCell = db->aDb[0].pBt->pBt->pTmpSpace;
-    //pX init
-    pX->nData = redo_size - sizeof(i64) - sizeof(int);
+    //btreeGetPage(db->aDb[0].pBt->pBt, 1, &(db->aDb[0].pBt->pBt->pPage1), 0);
+    sqlite3BtreeEnter(db->aDb[0].pBt);
+    btreeGetPage(db->aDb[0].pBt->pBt, pgno, &(pPage), 0);
+
+    printf("REcovery start\n");
+
+    //btree get page
    
-    memcpy(&nKey,redo_log,sizeof(i64));
-    memcpy(&idx, redo_log+sizeof(i64),sizeof(int)); 
-    
-    pX->pKey = 0;
-    pX->nKey = nKey;
-    pX->pData = redo_log+sizeof(i64)+sizeof(int);
-    pX->nZero = 0;
-    fillInCell(pPage, newCell, pX, &szNew);
-    insertCell(pPage, idx, newCell, szNew, 0, 0, &rc);
+    memcpy(&idx,redo_log,sizeof(int));
+
+int tmpI;
+for(tmpI=0;tmpI < redo_size; tmpI++){                                                                                                                 
+printf("%d",*(redo_log+tmpI));                                                                                                        
+}        
+
+    //insert cell
+    insertCell(pPage, idx,redo_log+sizeof(int), redo_size-sizeof(int), 0, 0, &rc);
+    sqlite3BtreeLeave(db->aDb[0].pBt);
   }
   log_buffer = origin_log_buffer;
   memset(log_buffer, 0x00, 1024*4096);
   msync(log_buffer, 1024*4096, MS_SYNC);
-
-  sqlite3BtreeLeave(db->aDb[0].pBt);
-
-
-  if( db->mallocFailed ){
-    goto opendb_out;
-  }
-
-  /* Register all built-in functions, but do not attempt to read the
-  ** database schema yet. This is delayed until the first time the database
-  ** is accessed.
-  */
-  sqlite3Error(db, SQLITE_OK);
-  sqlite3RegisterPerConnectionBuiltinFunctions(db);
-
-  /* Load automatic extensions - extensions that have been registered
-  ** using the sqlite3_automatic_extension() API.
-  */
-  rc = sqlite3_errcode(db);
-  if( rc==SQLITE_OK ){
-    sqlite3AutoLoadExtensions(db);
-    rc = sqlite3_errcode(db);
-    if( rc!=SQLITE_OK ){
-      goto opendb_out;
-    }
-  }
 
 #ifdef SQLITE_ENABLE_FTS1
   if( !db->mallocFailed ){

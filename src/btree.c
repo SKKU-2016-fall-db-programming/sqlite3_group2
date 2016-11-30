@@ -1923,7 +1923,7 @@ static MemPage *btreePageFromDbPage(DbPage *pDbPage, Pgno pgno, BtShared *pBt){
 ** means we have started to be concerned about content and the disk
 ** read should occur at that point.
 */
-static int btreeGetPage(
+int btreeGetPage(
   BtShared *pBt,       /* The btree */
   Pgno pgno,           /* Number of the page to fetch */
   MemPage **ppPage,    /* Return the page in this parameter */
@@ -3846,9 +3846,11 @@ int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 
       btreeEndTransaction(p);
       sqlite3BtreeLeave(p);
-      log_buffer = origin_log_buffer;
-      memset(log_buffer, 0x00, 1024*4096);
-      msync(log_buffer, 1024 * 4096, MS_SYNC);
+      if(is_open == 0){
+          log_buffer = origin_log_buffer;
+          memset(log_buffer, 0x00, 1024*4096);
+          msync(log_buffer, 1024 * 4096, MS_SYNC);
+      }
       if(log_buffer == MAP_FAILED){
 	fprintf(stderr, "LOG FILE MAPPING ERROR\n");
       }
@@ -6313,7 +6315,7 @@ static void dropCell(MemPage *pPage, int idx, int sz, int *pRC){
 **
 ** *pRC must be SQLITE_OK when this routine is called.
 */
-static void insertCell(
+void insertCell(
   MemPage *pPage,   /* Page into which we are copying */
   int i,            /* New cell becomes the i-th cell of the page */
   u8 *pCell,        /* Content of the new cell */
@@ -8076,10 +8078,16 @@ int sqlite3BtreeInsert(
 
   //redo for update and insert
   pPage->xParseCell(pPage, newCell, &cellinfo);
-  redo_s = sizeof(char)*cellinfo.nPayload + sizeof(i64);
+  int tmpIdx = cellinfo.nPayload;
+  int tmpI;
+  for(tmpI=0;tmpI < tmpIdx; tmpI++){
+      printf("%d",*(cellinfo.pPayload+tmpI));
+  }
+  puts("");
+  redo_s = sizeof(char)*cellinfo.nPayload + sizeof(int);
   redo_log = (char*)malloc(redo_s);
-  memcpy(redo_log, &(cellinfo.nKey), sizeof(i64));
-  memcpy(redo_log+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
+  memcpy(redo_log, &(idx), sizeof(int));
+  memcpy(redo_log+sizeof(int), cellinfo.pPayload, cellinfo.nPayload);
 
   //printf("%s", cellinfo.pPayload);
   if(loc != 0){

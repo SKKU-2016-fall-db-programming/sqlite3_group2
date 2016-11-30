@@ -711,14 +711,17 @@ int p_check;
 extern int log_fd;
 extern void *log_buffer;
 extern unsigned int lastLsn; 
+extern int is_open;
 /*
  * function for physio-logical logging
  * */
 //to save origin log buffer 
 void * origin_log_buffer = NULL;
 void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int undo_size,const char *undo_log){
+    if(is_open == 1)
+        return;
     if(origin_log_buffer == NULL)
-	origin_log_buffer = log_buffer;
+	    origin_log_buffer = log_buffer;
     static void * old_log_buffer;
     if(opcode == 0){
         old_log_buffer = log_buffer;
@@ -728,15 +731,15 @@ void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int u
     printf("log : %u %d %d %d %d %d %d\n", lastLsn, pgno, opcode, redo_size, undo_size, log_size, p_check);
     p_check++;
     int tmp_size = 0;
-    memcpy(log, &lastLsn, sizeof(int));
-    lastLsn+=log_size;
-    tmp_size+=sizeof(int);
     memcpy(log+tmp_size, &log_size, sizeof(int));
-    tmp_size+= sizeof(Pgno);
+    tmp_size+=sizeof(int);
+    memcpy(log+tmp_size, &lastLsn, sizeof(int));
+    tmp_size+= sizeof(int);
+    lastLsn+=log_size;
     memcpy(log+tmp_size, &opcode, sizeof(int));
     tmp_size+= sizeof(int);
     memcpy(log+tmp_size, &pgno, sizeof(Pgno));
-    tmp_size+= sizeof(int);
+    tmp_size+= sizeof(Pgno);
     memcpy(log+tmp_size, &redo_size,sizeof(int));
     tmp_size+= sizeof(int);
     memcpy(log+tmp_size, redo_log, redo_size);
@@ -754,5 +757,7 @@ void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int u
     //write(log_fd, log, log_size);
     free(log);
 };
+int btreeGetPage(BtShared*, Pgno, MemPage **, int);
+void insertCell(MemPage*, int, u8*, int, u8*, Pgno, int*);
 
 
