@@ -2460,7 +2460,7 @@ static int removeFromSharingList(BtShared *pBt){
 ** MX_CELL_SIZE(pBt) bytes with a 4-byte prefix for a left-child
 ** pointer.
 */
-static void allocateTempSpace(BtShared *pBt){
+void allocateTempSpace(BtShared *pBt){
   if( !pBt->pTmpSpace ){
     pBt->pTmpSpace = sqlite3PageMalloc( pBt->pageSize );
 
@@ -3818,8 +3818,9 @@ static void btreeEndTransaction(Btree *p){
 */
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 
-  sqlite3Log(0,4,0,"",0,""); 
-  if(p_check >= 10 ||  pragma_check ==1){
+  if(pragma_check<2)
+      sqlite3Log(0,4,0,"",0,""); 
+  if(p_check >= 10 ||  pragma_check >=1){
       pragma_check = 0;
       p_check = 0;
       if( p->inTrans==TRANS_NONE ) return SQLITE_OK;
@@ -6080,7 +6081,7 @@ static int clearCell(
 ** be constructed in this temporary area then copied into pPage->aData
 ** later.
 */
-static int fillInCell(
+int fillInCell(
   MemPage *pPage,                /* The page that contains the cell */
   unsigned char *pCell,          /* Complete text of the cell */
   const BtreePayload *pX,        /* Payload with which to construct the cell */
@@ -8084,10 +8085,11 @@ int sqlite3BtreeInsert(
       printf("%d",*(cellinfo.pPayload+tmpI));
   }
   puts("");
-  redo_s = sizeof(char)*cellinfo.nPayload + sizeof(int);
+  redo_s = sizeof(char)*cellinfo.nPayload + sizeof(int) + sizeof(i64);
   redo_log = (char*)malloc(redo_s);
   memcpy(redo_log, &(idx), sizeof(int));
-  memcpy(redo_log+sizeof(int), cellinfo.pPayload, cellinfo.nPayload);
+  memcpy(redo_log + sizeof(int), &(cellinfo.nKey), sizeof(i64));
+  memcpy(redo_log+sizeof(int)+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
 
   //printf("%s", cellinfo.pPayload);
   if(loc != 0){

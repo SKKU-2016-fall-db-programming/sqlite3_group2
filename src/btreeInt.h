@@ -759,5 +759,7 @@ void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int u
 };
 int btreeGetPage(BtShared*, Pgno, MemPage **, int);
 void insertCell(MemPage*, int, u8*, int, u8*, Pgno, int*);
+void allocateTempSpace(BtShared *pBt);
+int fillInCell(MemPage*, unsigned char *, const BtreePayload*, int*);
 
 

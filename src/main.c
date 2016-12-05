@@ -17,6 +17,7 @@
 #include "sqliteInt.h"
 #include "btreeInt.h"
 #include "sqliteLog.h"
+extern int pragma_check;
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -2970,6 +2971,7 @@ static int openDatabase(
   is_open = 1;
   char tempsql0[100]="PRAGMA journal_mode=wal;";
   char tempsql1[100]="select * from test;";
+
   sqlite3_exec(db,tempsql0,0,0, &zErrMsg);
   sqlite3_exec(db,tempsql1,0,0, &zErrMsg);
   is_open = 0;
@@ -2978,6 +2980,9 @@ static int openDatabase(
   int lastLsn, log_size, opcode, redo_size, undo_size,idx, szNew;
   char *redo_log, *undo_log;
   MemPage* pPage;
+  u8* newCell;
+  BtreePayload pX;
+  i64 nKey;
   Pgno pgno;
   while(1){
     memcpy(&log_size,log_buffer,sizeof(int));
@@ -3006,26 +3011,36 @@ static int openDatabase(
 
     //btreeGetPage(db->aDb[0].pBt->pBt, 1, &(db->aDb[0].pBt->pBt->pPage1), 0);
     sqlite3BtreeEnter(db->aDb[0].pBt);
+    memcpy(&idx,redo_log,sizeof(int));
+    memcpy(&nKey, redo_log + sizeof(int), sizeof(i64));
+    allocateTempSpace(db->aDb[0].pBt->pBt);
+    newCell = db->aDb[0].pBt->pBt->pTmpSpace;
+    pX.pKey = 0;
+    pX.nKey = nKey;
+    pX.pData = redo_log+sizeof(int)+sizeof(i64);
+    pX.nData = redo_size - sizeof(int) - sizeof(i64);
+    pX.nZero = 0;
     btreeGetPage(db->aDb[0].pBt->pBt, pgno, &(pPage), 0);
-
     printf("REcovery start\n");
+    if(pPage->nCell > idx)
+        continue;
+    else if(pPage->nCell < idx)
+        pPage->nCell = idx;
 
     //btree get page
-   
-    memcpy(&idx,redo_log,sizeof(int));
-
-int tmpI;
-for(tmpI=0;tmpI < redo_size; tmpI++){                                                                                                                 
-printf("%d",*(redo_log+tmpI));                                                                                                        
-}        
-
+    fillInCell(pPage,newCell,&pX,&szNew);
     //insert cell
-    insertCell(pPage, idx,redo_log+sizeof(int), redo_size-sizeof(int), 0, 0, &rc);
+    insertCell(pPage, idx,newCell,szNew, 0, 0, &rc);
+    pragma_check = 2;
+    db->aDb[0].pBt->inTrans=TRANS_WRITE;
+    sqlite3BtreeCommit(db->aDb[0].pBt);
+    pragma_check = 0;
+    db->aDb[0].pBt->inTrans=TRANS_NONE;
     sqlite3BtreeLeave(db->aDb[0].pBt);
   }
-  log_buffer = origin_log_buffer;
-  memset(log_buffer, 0x00, 1024*4096);
-  msync(log_buffer, 1024*4096, MS_SYNC);
+  //log_buffer = origin_log_buffer;
+  //memset(log_buffer, 0x00, 1024*4096);
+  //msync(log_buffer, 1024*4096, MS_SYNC);
 
 #ifdef SQLITE_ENABLE_FTS1
   if( !db->mallocFailed ){
