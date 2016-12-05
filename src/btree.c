@@ -3727,7 +3727,7 @@ static int autoVacuumCommit(BtShared *pBt){
 */
 int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zMaster){
   int rc = SQLITE_OK;
-  if(p_check >= 10 || pragma_check == 1){
+  if(p_check >= 10 || pragma_check >= 1){
   if( p->inTrans==TRANS_WRITE ){
     BtShared *pBt = p->pBt;
     sqlite3BtreeEnter(p);

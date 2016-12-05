@@ -3022,6 +3022,7 @@ static int openDatabase(
     pX.nZero = 0;
     btreeGetPage(db->aDb[0].pBt->pBt, pgno, &(pPage), 0);
     printf("REcovery start\n");
+
     if(pPage->nCell > idx)
         continue;
     else if(pPage->nCell < idx)
@@ -3031,13 +3032,16 @@ static int openDatabase(
     fillInCell(pPage,newCell,&pX,&szNew);
     //insert cell
     insertCell(pPage, idx,newCell,szNew, 0, 0, &rc);
-    pragma_check = 2;
-    db->aDb[0].pBt->inTrans=TRANS_WRITE;
-    sqlite3BtreeCommit(db->aDb[0].pBt);
-    pragma_check = 0;
-    db->aDb[0].pBt->inTrans=TRANS_NONE;
     sqlite3BtreeLeave(db->aDb[0].pBt);
   }
+  //pragma_check = 2;
+  db->aDb[0].pBt->inTrans=TRANS_WRITE;
+  //sqlite3BtreeCommit(db->aDb[0].pBt);
+  pragma_check = 1;
+  is_open = 1;
+  sqlite3_exec(db,tempsql0,0,0, &zErrMsg);
+  is_open = 0;
+  db->aDb[0].pBt->inTrans=TRANS_NONE;
   //log_buffer = origin_log_buffer;
   //memset(log_buffer, 0x00, 1024*4096);
   //msync(log_buffer, 1024*4096, MS_SYNC);
