@@ -708,6 +708,7 @@ struct IntegrityCk {
 #endif
 
 int p_check;
+extern int pragma_check;
 extern int log_fd;
 extern void *log_buffer;
 extern unsigned int lastLsn; 
@@ -756,6 +757,8 @@ void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int u
     log_buffer+=log_size;
     //write(log_fd, log, log_size);
     free(log);
+    if(pragma_check >=1)
+        pragma_check = 0;
 };
 int btreeGetPage(BtShared*, Pgno, MemPage **, int);
 void insertCell(MemPage*, int, u8*, int, u8*, Pgno, int*);

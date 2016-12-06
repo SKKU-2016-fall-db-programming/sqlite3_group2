@@ -3818,10 +3818,8 @@ static void btreeEndTransaction(Btree *p){
 */
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 
-  if(pragma_check<2)
-      sqlite3Log(0,4,0,"",0,""); 
   if(p_check >= 10 ||  pragma_check >=1){
-      pragma_check = 0;
+      //pragma_check = 0;
       p_check = 0;
       if( p->inTrans==TRANS_NONE ) return SQLITE_OK;
       sqlite3BtreeEnter(p);
@@ -3857,6 +3855,8 @@ int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
       }
   }
   //sqlite3Log(0,4,0,"",0,"");
+  if(pragma_check<2)
+      sqlite3Log(0,4,0,"",0,""); 
   return SQLITE_OK;
 
 }
@@ -8085,11 +8085,18 @@ int sqlite3BtreeInsert(
       printf("%d",*(cellinfo.pPayload+tmpI));
   }
   puts("");
-  redo_s = sizeof(char)*cellinfo.nPayload + sizeof(int) + sizeof(i64);
-  redo_log = (char*)malloc(redo_s);
-  memcpy(redo_log, &(idx), sizeof(int));
-  memcpy(redo_log + sizeof(int), &(cellinfo.nKey), sizeof(i64));
-  memcpy(redo_log+sizeof(int)+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
+  if(pPage->intKey){
+      redo_s = sizeof(char)*cellinfo.nPayload + sizeof(int) + sizeof(i64);
+      redo_log = (char*)malloc(redo_s);
+      memcpy(redo_log, &(idx), sizeof(int));
+      memcpy(redo_log + sizeof(int), &(cellinfo.nKey), sizeof(i64));
+      memcpy(redo_log+sizeof(int)+sizeof(i64), cellinfo.pPayload, cellinfo.nPayload);
+  }else{
+      redo_s = sizeof(char)*(pX->nKey) + sizeof(i64);
+      redo_log = (char*)malloc(redo_s);
+      memcpy(redo_log, &(pX->nKey), sizeof(i64));
+      memcpy(redo_log + sizeof(i64), &(pX->pKey), sizeof(char)*(pX->nKey));
+  }
 
   //printf("%s", cellinfo.pPayload);
   if(loc != 0){

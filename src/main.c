@@ -3009,18 +3009,28 @@ static int openDatabase(
     if(opcode != 1)
         continue;
 
-    //btreeGetPage(db->aDb[0].pBt->pBt, 1, &(db->aDb[0].pBt->pBt->pPage1), 0);
     sqlite3BtreeEnter(db->aDb[0].pBt);
-    memcpy(&idx,redo_log,sizeof(int));
-    memcpy(&nKey, redo_log + sizeof(int), sizeof(i64));
     allocateTempSpace(db->aDb[0].pBt->pBt);
     newCell = db->aDb[0].pBt->pBt->pTmpSpace;
-    pX.pKey = 0;
-    pX.nKey = nKey;
-    pX.pData = redo_log+sizeof(int)+sizeof(i64);
-    pX.nData = redo_size - sizeof(int) - sizeof(i64);
-    pX.nZero = 0;
     btreeGetPage(db->aDb[0].pBt->pBt, pgno, &(pPage), 0);
+    if(pPage->intKey){
+        memcpy(&idx,redo_log,sizeof(int));
+        memcpy(&nKey, redo_log + sizeof(int), sizeof(i64));
+    }else{
+        btreeGetPage(db->aDb[0].pBt->pBt, 1, &(db->aDb[0].pBt->pBt->pPage1), 0);
+        memcpy(&nKey,redo_log,sizeof(i64));
+    }
+    if(pPage->intKey){
+        pX.pKey = 0;
+        pX.nKey = nKey;
+        pX.pData = redo_log+sizeof(int)+sizeof(i64);
+        pX.nData = redo_size - sizeof(int) - sizeof(i64);
+        pX.nZero = 0;
+    }else{
+        pX.pKey = redo_log+sizeof(i64);
+        pX.nKey = nKey;
+    }
+    sqlite3PagerWrite(pPage->pDbPage);
     printf("REcovery start\n");
 
     if(pPage->nCell > idx)
