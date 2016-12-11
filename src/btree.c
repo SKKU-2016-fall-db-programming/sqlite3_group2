@@ -3727,7 +3727,7 @@ static int autoVacuumCommit(BtShared *pBt){
 */
 int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zMaster){
   int rc = SQLITE_OK;
-  if(p_check >= 10 || pragma_check >= 1){
+  if(p_check >= 1000 || pragma_check >= 1){
   if( p->inTrans==TRANS_WRITE ){
     BtShared *pBt = p->pBt;
     sqlite3BtreeEnter(p);
@@ -3818,8 +3818,10 @@ static void btreeEndTransaction(Btree *p){
 */
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 
-  if(p_check >= 10 ||  pragma_check >=1){
+  if(p_check >= 1000 ||  pragma_check >=1){
       //pragma_check = 0;
+      if(pragma_check == 3)
+	      pragma_check = 0;
       p_check = 0;
       if( p->inTrans==TRANS_NONE ) return SQLITE_OK;
       sqlite3BtreeEnter(p);
@@ -8138,14 +8140,16 @@ int sqlite3BtreeInsert(
     assert( rc==SQLITE_OK );
     pCur->curFlags &= ~(BTCF_ValidNKey);
     rc = balance(pCur);
-
+    printf("overflow\n");
     /* Must make sure nOverflow is reset to zero even if the balance()
     ** fails. Internal data structure corruption will result otherwise. 
     ** Also, set the cursor state to invalid. This stops saveCursorPosition()
     ** from trying to save the current position of the cursor.  */
     pCur->apPage[pCur->iPage]->nOverflow = 0;
     pCur->eState = CURSOR_INVALID;
+    pragma_check=3;
   }
+
   assert( pCur->apPage[pCur->iPage]->nOverflow==0 );
 
 end_insert:

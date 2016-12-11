@@ -757,7 +757,7 @@ void sqlite3Log(Pgno pgno,int opcode, int redo_size, const char *redo_log, int u
     log_buffer+=log_size;
     //write(log_fd, log, log_size);
     free(log);
-    if(pragma_check >=1)
+    if(pragma_check != 3)
         pragma_check = 0;
 };
 int btreeGetPage(BtShared*, Pgno, MemPage **, int);
