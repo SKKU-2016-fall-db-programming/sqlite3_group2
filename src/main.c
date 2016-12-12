@@ -3017,7 +3017,8 @@ static int openDatabase(
         memcpy(&idx,redo_log,sizeof(int));
         memcpy(&nKey, redo_log + sizeof(int), sizeof(i64));
     }else{
-        btreeGetPage(db->aDb[0].pBt->pBt, 1, &(db->aDb[0].pBt->pBt->pPage1), 0);
+        pPage->pBt->pPager = db->aDb[0].pBt->pBt->pPager;
+        btreeGetPage(pPage->pBt, 1, &(pPage->pBt->pPage1), 0);
         memcpy(&nKey,redo_log,sizeof(i64));
     }
     if(pPage->intKey){
@@ -3052,9 +3053,9 @@ static int openDatabase(
   sqlite3_exec(db,tempsql0,0,0, &zErrMsg);
   is_open = 0;
   db->aDb[0].pBt->inTrans=TRANS_NONE;
-  //log_buffer = origin_log_buffer;
-  //memset(log_buffer, 0x00, 1024*4096);
-  //msync(log_buffer, 1024*4096, MS_SYNC);
+  log_buffer = origin_log_buffer;
+  memset(log_buffer, 0x00, 1024*4096);
+  msync(log_buffer, 1024*4096, MS_SYNC);
 
 #ifdef SQLITE_ENABLE_FTS1
   if( !db->mallocFailed ){
