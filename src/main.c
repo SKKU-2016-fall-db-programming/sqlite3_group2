@@ -3044,6 +3044,9 @@ static int openDatabase(
     //insert cell
     insertCell(pPage, idx,newCell,szNew, 0, 0, &rc);
     sqlite3BtreeLeave(db->aDb[0].pBt);
+
+    pPage->pDbPage->pPager->eState = PAGER_WRITER_FINISHED;
+    sqlite3PcacheMakeDirty(pPage->pDbPage);
   }
   //pragma_check = 2;
   db->aDb[0].pBt->inTrans=TRANS_WRITE;
