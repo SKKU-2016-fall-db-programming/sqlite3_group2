@@ -3043,6 +3043,9 @@ static int openDatabase(
     //insert cell
     insertCell(pPage, idx,newCell,szNew, 0, 0, &rc);
     sqlite3BtreeLeave(db->aDb[0].pBt);
+
+    pPage->pDbPage->pPager->eState = PAGER_WRITER_FINISHED;
+    sqlite3PcacheMakeDirty(pPage->pDbPage);
   }
   //pragma_check = 2;
   db->aDb[0].pBt->inTrans=TRANS_WRITE;
@@ -3052,9 +3055,9 @@ static int openDatabase(
   sqlite3_exec(db,tempsql0,0,0, &zErrMsg);
   is_open = 0;
   db->aDb[0].pBt->inTrans=TRANS_NONE;
-  //log_buffer = origin_log_buffer;
-  //memset(log_buffer, 0x00, 1024*4096);
-  //msync(log_buffer, 1024*4096, MS_SYNC);
+  log_buffer = origin_log_buffer;
+  memset(log_buffer, 0x00, 1024*4096);
+  msync(log_buffer, 1024*4096, MS_SYNC);
 
 #ifdef SQLITE_ENABLE_FTS1
   if( !db->mallocFailed ){
