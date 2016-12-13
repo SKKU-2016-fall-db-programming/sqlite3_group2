@@ -3013,11 +3013,11 @@ static int openDatabase(
     allocateTempSpace(db->aDb[0].pBt->pBt);
     newCell = db->aDb[0].pBt->pBt->pTmpSpace;
     btreeGetPage(db->aDb[0].pBt->pBt, pgno, &(pPage), 0);
+    pPage->pBt->pPager = db->aDb[0].pBt->pBt->pPager;
     if(pPage->intKey){
         memcpy(&idx,redo_log,sizeof(int));
         memcpy(&nKey, redo_log + sizeof(int), sizeof(i64));
     }else{
-        pPage->pBt->pPager = db->aDb[0].pBt->pBt->pPager;
         btreeGetPage(pPage->pBt, 1, &(pPage->pBt->pPage1), 0);
         memcpy(&nKey,redo_log,sizeof(i64));
     }
@@ -3044,8 +3044,9 @@ static int openDatabase(
     //insert cell
     insertCell(pPage, idx,newCell,szNew, 0, 0, &rc);
     sqlite3BtreeLeave(db->aDb[0].pBt);
-
+    pPage->pDbPage->pPager = db->aDb[0].pBt->pBt->pPager;
     pPage->pDbPage->pPager->eState = PAGER_WRITER_FINISHED;
+    pPage->pDbPage->pCache = db->aDb[0].pBt->pBt->pPage1->pDbPage->pCache;
     sqlite3PcacheMakeDirty(pPage->pDbPage);
   }
   //pragma_check = 2;
@@ -3059,6 +3060,10 @@ static int openDatabase(
   log_buffer = origin_log_buffer;
   memset(log_buffer, 0x00, 1024*4096);
   msync(log_buffer, 1024*4096, MS_SYNC);
+
+  is_open = 1;
+  sqlite3_exec(db,tempsql1,0,0, &zErrMsg);
+  is_open = 0;
 
 #ifdef SQLITE_ENABLE_FTS1
   if( !db->mallocFailed ){
